@@ -1,0 +1,75 @@
+#!/usr/bin/python3
+
+"""
+Prometheus exporter providing info on all the heating circuits
+managed by the BMR controll unit.
+"""
+import http.server
+import argparse
+# https://github.com/slesinger/pybmr
+import pybmr
+
+def reconnect(url, username, password):
+    print("reconnecting to BMR")
+    global BMR
+    BMR = pybmr.Bmr(url, username, password)
+
+class MainHandler(http.server.BaseHTTPRequestHandler):
+    def output(self, message):
+        self.wfile.write(message.encode("utf-8"))
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.output("# TYPE bmr_heating_circuit_temperature gauge\n")
+        self.output("# TYPE bmr_heating_circuit_target_temperature gauge\n")
+        self.output("# TYPE bmr_heating_circuit_heating gauge\n")
+        self.output("# TYPE bmr_heating_circuit_cooling gauge\n")
+        self.output("# TYPE bmr_heating_circuit_user_offset gauge\n")
+        self.output("# TYPE bmr_heating_circuit_max_offset gauge\n")
+        self.output("# TYPE bmr_heating_circuit_warning gauge\n")
+        self.output("# TYPE bmr_heating_circuit_low_mode gauge\n")
+        self.output("# TYPE bmr_heating_circuit_summer_mode gauge\n")
+        circuits_count = BMR.getNumCircuits() 
+        for c in range(circuits_count): 
+            try:
+                circuit = BMR.getCircuit(c) 
+            except:
+                reconnect(url=OPTIONS.url, username=OPTIONS.username, password=OPTIONS.password)
+                circuit = BMR.getCircuit(c) 
+            # print(circuit)
+            # {'id': 12, 'enabled': True, 'name': 'Pracovna', 'temperature': 19.2, 'target_temperature': 18.0, 'user_offset': 0.0, 'max_offset': 5.0, 'heating': False, 'warning': 0, 'cooling': False, 'low_mode': False, 'summer_mode': False}
+            sensor = "air"
+            if circuit["name"].startswith("P "):
+                # this is the in-floor limiting sensor
+                sensor = "floor"
+                circuit["name"] = circuit["name"][2:]
+            if not circuit["temperature"]:
+                # offline circuit returns None
+                continue
+            for prop in circuit.keys():
+                if prop == 'name':
+                    continue
+                value = circuit[prop]
+                if value == True:
+                    value = 1
+                if value == False:
+                    value = 0
+                self.output("""bmr_heating_circuit_{prop}{{room="{room}" sensor="{sensor}"}} {value}\n""".format(
+                            prop=prop,
+                            sensor=sensor,
+                            room=circuit["name"],
+                            value=value))
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--url", help="URL of the BM control unit")
+parser.add_argument("--password", help="password")
+parser.add_argument("--username", help="username")
+parser.add_argument("--port", default=8006,
+                    help="Port to listen on - Prometheus will connect to this port")
+OPTIONS = parser.parse_args()
+
+reconnect(url=OPTIONS.url, username=OPTIONS.username, password=OPTIONS.password)
+server = http.server.HTTPServer(("", OPTIONS.port), MainHandler)
+server.serve_forever()

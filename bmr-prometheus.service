@@ -1,0 +1,14 @@
+[Unit]
+Description=BMR data exporter to Prometheus
+After=basic.target network.target
+
+[Service]
+User=bmr
+Group=bmr
+EnvironmentFile=/etc/sysconfig/bmr
+ExecStart=/home/bmr/bmr-prometheus --url=${BMR_URL} --username=${BMR_USERNAME} --password=${BMR_PASSWORD}
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
